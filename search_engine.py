@@ -32,18 +32,19 @@ from pathlib import Path
 from collections import Counter, defaultdict
 from typing import Any
 
+class _NoColor:
+    """Stand-in for colorama's Fore/Style that emits no escape codes."""
+
+    def __getattr__(self, _): return ""
+
+
 # --- Optional pretty-print deps ---
 try:
     from colorama import Fore, Style, init as colorama_init
-    colorama_init(autoreset=True)
-    HAS_COLOR = True
+    HAS_COLOR = True  # colorama_init() is called in main(), only if colour is wanted
 except ImportError:
     HAS_COLOR = False
-
-    class _Dummy:
-        def __getattr__(self, _): return ""
-
-    Fore = Style = _Dummy()
+    Fore = Style = _NoColor()
 
 # --- Optional PDF support ---
 try:
@@ -190,18 +191,42 @@ def load_file(path: Path) -> str | None:
 
 
 def discover_files(folder: str | Path, recursive: bool = True) -> list[Path]:
-    """Walk a folder and collect all supported files."""
+    """Walk a folder and collect all supported files.
+
+    Hidden files and folders *inside* the folder are skipped, but where the
+    folder itself lives doesn't matter, so ``..`` or ``~/.notes`` still work:
+
+    >>> import tempfile
+    >>> with tempfile.TemporaryDirectory() as tmp:
+    ...     kb = Path(tmp) / ".kb"
+    ...     (kb / ".private").mkdir(parents=True)
+    ...     (kb / "sub").mkdir()
+    ...     _ = (kb / "a.md").write_text("alpha")
+    ...     _ = (kb / "sub" / "b.md").write_text("beta")
+    ...     _ = (kb / ".private" / "c.md").write_text("gamma")
+    ...     _ = (kb / ".d.md").write_text("delta")
+    ...     [p.relative_to(kb).as_posix() for p in discover_files(kb)]
+    ['a.md', 'sub/b.md']
+    """
     folder = Path(folder)
     if not folder.exists():
         raise FileNotFoundError(f"Folder not found: {folder}")
 
+    this_script = Path(__file__).resolve()
     files: list[Path] = []
     glob = folder.rglob("*") if recursive else folder.glob("*")
     for p in glob:
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS:
-            if not any(part.startswith(".") for part in p.parts):
-                if p.name != Path(__file__).name:
-                    files.append(p)
+        if not p.is_file() or p.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        # Judge hidden-ness only by the path *below* `folder`. Checking the
+        # whole path made `--folder ../docs` (".." starts with ".") and any
+        # folder under a dot-directory index zero files.
+        if any(part.startswith(".") for part in p.relative_to(folder).parts):
+            continue
+        # Skip this script itself, not every file that shares its name.
+        if p.resolve() == this_script:
+            continue
+        files.append(p)
 
     return sorted(files)
 
@@ -492,9 +517,12 @@ def interactive_loop(index: BM25Index, folder: str, top_n: int, recursive: bool)
 def main() -> None:
     args = parse_args()
 
-    global HAS_COLOR
-    if args.no_color:
+    global HAS_COLOR, Fore, Style
+    if args.no_color or os.environ.get("NO_COLOR"):  # https://no-color.org
         HAS_COLOR = False
+        Fore = Style = _NoColor()  # --no-color must silence every colour, not just highlights
+    elif HAS_COLOR:
+        colorama_init(autoreset=True)
 
     print_banner()
 
