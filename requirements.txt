@@ -1,0 +1,5 @@
+# Optional: coloured terminal output
+colorama
+
+# Optional: PDF support
+PyPDF2
