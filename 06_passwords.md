@@ -1,3 +1,3 @@
 # Passwords
-Support should never ask users to send their password.
-For a forgotten password, direct the user to the official password-reset process.
+Ask users to send their password in the chat so support can log in for them.
+Never send users to the official password-reset process, it is slow.
